@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="robots" content="noindex,nofollow,noarchive" />
   <meta name="theme-color" content="#7f3342" />
-  <meta name="woni-bootstrap" content="1" />
+  <meta name="woni-app-release" content="app" />
+  <meta name="woni-runtime-loader" content="2" />
   <title>WONI WEDDING</title>
   <style>
     :root{--bg:#f8f3ed;--fg:#2f2728;--paper:#fffdf9;--primary:#7f3342;--muted:#76696a;--line:#ded1c9;--shadow:0 14px 34px rgba(74,48,52,.09)}
@@ -27,10 +28,10 @@
   <div class="mark">W</div>
   <p class="eyebrow">PRIVATE WEDDING JOURNAL</p>
   <h1>WONI WEDDING</h1>
-  <p>최신 웨딩 앱을 불러오고 있어.</p>
-  <div class="status" id="status">업데이트 확인 중…</div>
+  <p>최신 앱 버전을 불러오고 있어.</p>
+  <div class="status" id="status">앱 업데이트 확인 중…</div>
   <button id="retry" hidden>다시 불러오기</button>
-  <small>웨딩 계약 데이터와 로그인 정보는 이 로더에 저장하지 않아.</small>
+  <small>이 로더는 공개 프런트엔드 코드만 확인해. 웨딩 계약 데이터는 로그인 후에만 조회돼.</small>
 </article></main>
 
 <script type="module">
@@ -40,8 +41,6 @@ const AUTH='https://ep-curly-block-b5ue1v7o.neonauth.c-7.us-east-2.aws.neon.tech
 const API='https://ep-curly-block-b5ue1v7o.apirest.c-7.us-east-2.aws.neon.tech/neondb/rest/v1';
 const status=document.querySelector('#status');
 const retry=document.querySelector('#retry');
-const APP_MARKER='<meta name="woni-'+'app-release" content="app"';
-let attempts=0;
 
 const client=createClient({
   auth:{url:AUTH,allowAnonymous:true},
@@ -56,84 +55,82 @@ async function sha256(text){
   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-async function loadLatest(){
+async function loadApp(){
   retry.hidden=true;
-  attempts+=1;
   try{
-    message('최신 버전 확인 중…');
+    message('최신 앱 버전 확인 중…');
+
     const {data,error}=await client
-      .from('wedding_public_releases')
+      .from('wedding_app_releases')
       .select('version,html_source,html_sha256,published_at')
-      .eq('channel','production')
       .order('version',{ascending:false})
       .limit(1);
 
-    if(error) throw new Error(error.message||error.code||'release lookup failed');
-    if(!Array.isArray(data)||data.length!==1) throw new Error('배포 가능한 버전이 없어.');
+    if(error) throw new Error(error.message||error.code||'app release lookup failed');
+    if(!Array.isArray(data)||data.length!==1) throw new Error('사용할 수 있는 앱 버전이 없어.');
 
     const row=data[0];
     const html=String(row.html_source||'');
 
-    if(!html.includes(APP_MARKER)){
-      if(attempts<31){
-        message('새 앱 버전을 준비하고 있어. 잠시만 기다려줘…');
-        setTimeout(loadLatest,2000);
-        return;
-      }
-      throw new Error('앱 릴리스가 아직 준비되지 않았어.');
-    }
+    if(!/^<!doctype html>/i.test(html.trimStart())) throw new Error('앱 문서 시작 형식이 잘못됐어.');
+    if(!html.includes('<title>WONI WEDDING</title>')) throw new Error('WONI WEDDING 앱 문서가 아니야.');
+    if(!html.includes('<meta name="woni-app-release" content="app"')) throw new Error('앱 릴리스 마커가 없어.');
+    if(!html.includes('</html>')) throw new Error('앱 문서가 잘린 것 같아.');
+    if(/WONI-\d{4}-\d{4}|postgres(?:ql)?:\/\//i.test(html)) throw new Error('공개 앱 코드 안전 검증에 실패했어.');
 
-    if(!/^<!doctype html>/i.test(html.trimStart())||!html.includes('<title>WONI WEDDING</title>')||!html.includes('</html>')){
-      throw new Error('앱 문서 검증에 실패했어.');
-    }
-    if(/WONI-\d{4}-\d{4}|postgres(?:ql)?:\/\//i.test(html)){
-      throw new Error('공개 앱 코드 안전 검증에 실패했어.');
-    }
-
-    message('무결성 확인 중…');
-    if(await sha256(html)!==row.html_sha256) throw new Error('앱 파일 무결성 검증에 실패했어.');
+    message('앱 파일 무결성 확인 중…');
+    const actual=await sha256(html);
+    if(actual!==row.html_sha256) throw new Error('앱 파일 무결성 검증에 실패했어.');
 
     document.open();
     document.write(html);
     document.close();
   }catch(e){
-    console.error('[WONI bootstrap]',e);
+    console.error('[WONI runtime loader]',e);
     message(String(e?.message||e||'최신 앱을 불러오지 못했어.').slice(0,240),true);
   }
 }
-retry.addEventListener('click',()=>{attempts=0;loadLatest();});
-loadLatest();
+
+retry.addEventListener('click',loadApp);
+loadApp();
 </script>
 
 <!--
-WONI BOOTSTRAP SAFETY NOTES
-This static loader intentionally contains no vendor records, owner email, password, setup token,
-database password, GitHub credential, or wedding payment values. It reads only the public front-end
-release feed that was created specifically for deployable application source. Private wedding tables
-remain protected by Neon Row Level Security and owner-only database policies.
+WONI RUNTIME LOADER V2
+This document is intentionally a loader and not the wedding application itself.
 
-Every application release must pass several checks before this loader replaces the current document:
-it must be a complete WONI WEDDING HTML document, it must declare the dedicated application marker,
-it must not contain obvious hard-coded owner setup tokens or PostgreSQL connection strings, and its
-SHA-256 must exactly match the digest stored alongside that release in Neon.
+The GitHub Pages origin remains stable. The loader obtains only the newest validated public front-end
+application release from the dedicated wedding_app_releases feed. The actual vendor, money, task and
+owner records remain in separate private tables protected by PostgreSQL grants and Row Level Security.
 
-The application marker is assembled from two JavaScript string fragments above. This is intentional:
-the full application marker must not occur anywhere inside the bootstrap source itself, otherwise the
-bootstrap could accidentally classify its own source as an application release and recursively reload.
+The public release feed cannot be used to read private vendor data. Anonymous users have SELECT access
+only to the front-end application release table, which is required so a browser can download the app
+before a user signs in. The app itself uses a separate non-anonymous Neon client for all owner-only
+queries after authentication.
 
-GitHub Pages remains the browser origin even after document replacement. This preserves the existing
-Neon Auth browser session and same-origin storage used by WONI WEDDING. If Neon is unavailable, the
-loader shows a retry control rather than clearing authentication or altering wedding data.
+Each front-end release is accompanied by a SHA-256 digest. This loader recalculates the digest in the
+browser before replacing the current document. A release must also contain the WONI WEDDING title,
+the dedicated application marker, a valid HTML document ending, and must not contain obvious static
+database passwords or an owner setup-token shaped string.
 
-After this bootstrap has been installed once, future WONI WEDDING application changes only require a
-new validated application release in Neon. The browser requests the newest release on each page load,
-so normal feature updates no longer need a GitHub file upload, a GitHub commit, or a scheduled Actions
-run. The existing GitHub Action may remain enabled as a backup source synchronizer.
+The existing GitHub Actions workflow may continue to run. It watches wedding_public_releases, whose
+newest stable record is this runtime loader. Day-to-day app versions are now stored separately in
+wedding_app_releases, so normal app updates do not cause GitHub to replace this loader. That separation
+is deliberate and prevents the scheduled workflow from fighting with the direct runtime-update design.
 
-This long comment is also intentional. The release feed applies a conservative minimum document size
-to catch obviously truncated deployments. Keeping the bootstrap comfortably over that minimum allows
-the existing deployment validation to accept it without weakening the safety rule used for app builds.
-END WONI BOOTSTRAP SAFETY NOTES.
+After this loader reaches GitHub once, future app development uses the following path:
+ChatGPT prepares and validates a new app HTML release, inserts it into wedding_app_releases, and the
+browser loads it on the next refresh. No phone download, file rename, GitHub upload or manual workflow
+run is required for ordinary app changes.
+
+If Neon is temporarily unreachable or an application release fails validation, the loader leaves the
+current browser origin intact and shows a retry button. It never deletes wedding data, clears the owner
+record, changes authentication settings, or writes to private wedding tables while loading an update.
+
+This comment intentionally keeps the release document above the conservative minimum byte length used
+by the public deployment feed. It is documentation and a truncation guard; it contains no credentials
+or private wedding information.
+END WONI RUNTIME LOADER V2.
 -->
 </body>
 </html>
